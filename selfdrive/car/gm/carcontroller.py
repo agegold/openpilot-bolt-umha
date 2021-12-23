@@ -67,35 +67,39 @@ class CarController():
 
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, lkas_enabled))
 
-    # Pedal/Regen
-    comma_pedal =0  #for supress linter error.
-    pedal_gain = 0.95
-    last_pedal = 0
-    accelMultiplier = 0.475 #default initializer.
-    if CS.vEgo * CV.MS_TO_KPH < 10 :
-      accelMultiplier = 0.35
-    if CS.vEgo * CV.MS_TO_KPH < 40 :
-      accelMultiplier = 0.525
-    else : # above 40 km/h
-      accelMultiplier = 0.415
-
+    # Pedal/Regen  
     if not enabled or not CS.adaptive_Cruise or not CS.CP.enableGasInterceptor:
       comma_pedal = 0
     elif CS.adaptive_Cruise:
       min_pedal_speed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-      pedal_accel = actuators.accel * accelMultiplier
+      pedal_accel = actuators.accel * 0.45
       comma_pedal = clip(pedal_accel, min_pedal_speed, 1.)
 #      comma_pedal = clip(actuators.accel, 0., 1.)
 
-      final_pedal = (comma_pedal*pedal_gain) + (last_pedal * (1-pedal_gain))
-      final_pedal, self.accel_steady = accel_hysteresis(final_pedal, self.accel_steady)
-    
-      last_pedal = final_pedal
+      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
 
     if (frame % 4) == 0:
       idx = (frame // 4) % 4
-      can_sends.append(create_gas_interceptor_command(self.packer_pt, final_pedal, idx))
 
+      can_sends.append(create_gas_command(self.packer_pt, comma_pedal, idx))
+      
+      
+##페달에 accel, brake 개념 적용시      
+#    if CS.CP.enableGasInterceptor and (frame % 2) == 0:
+#      if not enabled or not CS.adaptive_Cruise:
+#        final_pedal = 0
+#      elif CS.adaptive_Cruise:
+#        min_pedal_speed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
+#        pedal_accel = actuators.accel / 4
+#        pedal = clip(pedal_accel, min_pedal_speed, 1.)
+#        regen = - pedal_accel
+#        pedal, self.accel_steady = accel_hysteresis(pedal, self.accel_steady)
+#        final_pedal = clip(pedal - regen, 0., 1.)
+#        if regen > 0.1:
+#          can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
+
+#        idx = (frame // 2) % 4
+#        can_sends.append(create_gas_command(self.packer_pt, final_pedal, idx))
 
     # Send dashboard UI commands (ACC status), 25hz
     #if (frame % 4) == 0:
