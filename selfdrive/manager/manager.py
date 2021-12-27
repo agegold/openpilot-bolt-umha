@@ -47,6 +47,12 @@ def manager_init():
     ("ShowDebugUI", "0"),
     ("ShowCpuTempUI", "0"),
     ("ShowBattLevelUI", "0"),
+    {"UseClusterSpeed", "1"},
+    {"MadModeEnabled", "1"},
+    {"AutoLaneChangeEnabled", "1"},
+    {"KeepSteeringTurnSignals", "1"},
+    {"WarningOverSpeedLimit", "1"},
+    {"SoftRestartTriggered", "0"},
 
     #Lateral Control Selection
     #("INDI_Selected", "0"),

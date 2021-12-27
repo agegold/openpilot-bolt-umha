@@ -7,6 +7,11 @@
 #include "selfdrive/ui/ui.h"
 
 
+#ifdef QCOM2
+#include <QTimer>
+#include "selfdrive/ui/qt/screenrecorder/screenrecorder.h"
+#endif
+
 // ***** onroad widgets *****
 
 class OnroadHud : public QWidget {
@@ -33,13 +38,15 @@ private:
   void drawIcon(QPainter &p, int x, int y, QPixmap &img, QBrush bg, float opacity);
   void drawText(QPainter &p, int x, int y, const QString &text, int alpha = 255);
   void paintEvent(QPaintEvent *event) override;
+    void drawText2(QPainter &p, int x, int y, int flags, const QString &text, const QColor& color);
+    void drawTextWithColor(QPainter &p, int x, int y, const QString &text, QColor& color);
 
   QPixmap engage_img;
   QPixmap dm_img;
   QPixmap brake_img;
   QPixmap lat_icon_img;
   QPixmap long_img;
-  const int radius = 192;
+  const int radius = 160;
   const int img_size = (radius / 2) * 1.5;
   QString speed;
   QString speedUnit;
@@ -52,6 +59,17 @@ private:
   bool mainOn = false;
   bool lkasEnabled = false;
   bool adaptiveCruise = false;
+
+
+    void drawMaxSpeed(QPainter &p);
+    void drawSpeed(QPainter &p);
+    void drawBottomIcons(QPainter &p);
+    void drawSpeedLimit(QPainter &p);
+    void drawTurnSignals(QPainter &p);
+    void drawGpsStatus(QPainter &p);
+    void drawDebugText(QPainter &p);
+    void drawHud(QPainter &p);
+
 
 signals:
   void valueChanged();

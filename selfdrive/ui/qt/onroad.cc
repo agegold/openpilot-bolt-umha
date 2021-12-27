@@ -211,7 +211,7 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   p.setRenderHint(QPainter::Antialiasing);
 
   // Header gradient
-  QLinearGradient bg(0, header_h - (header_h / 3.0), 0, header_h);
+  QLinearGradient bg(0, header_h - (header_h / 2.0), 0, header_h);
   bg.setColorAt(0, QColor::fromRgbF(0, 0, 0, 0.45));
   bg.setColorAt(1, QColor::fromRgbF(0, 0, 0, 0));
   p.fillRect(0, 0, width(), header_h, bg);
@@ -254,15 +254,19 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
 
   //lkas icon
   if ( (adaptiveCruise && lkasEnabled) || mainOn ) {
-    drawIcon(p, rect().center().x() - radius / 2 - bdr_s * 2 - 24, radius / 2 + int(bdr_s * 1.5),
+    drawIcon(p, rect().center().x() - radius / 2 - bdr_s * 2 - 36, radius / 2 + int(bdr_s * 1.5),
              lat_icon_img, QColor(0, 0, 0, 70), 1.0);
   }
   //long icon
   if(adaptiveCruise) {
-    drawIcon(p, rect().center().x() + radius / 2 + bdr_s * 2 + 24, radius / 2 + int(bdr_s * 1.5),
+    drawIcon(p, rect().center().x() + radius / 2 + bdr_s * 2 + 36, radius / 2 + int(bdr_s * 1.5),
              long_img, QColor(0, 0, 0, 70), 1.0);
 
   }
+
+  if(s->show_debug && width() > 1200)
+    drawDebugText(p);
+
 
 
 
@@ -283,7 +287,26 @@ void OnroadHud::drawIcon(QPainter &p, int x, int y, QPixmap &img, QBrush bg, flo
   p.setBrush(bg);
   p.drawEllipse(x - radius / 2, y - radius / 2, radius, radius);
   p.setOpacity(opacity);
-  p.drawPixmap(x - img_size / 2, y - img_size / 2, img);
+//  p.drawPixmap(x - img_size / 2, y - img_size / 2, img);
+  p.drawPixmap(x - img_size / 2, y - img_size / 2, img_size, img_size, img);
+}
+
+
+void OnroadHud::drawTextWithColor(QPainter &p, int x, int y, const QString &text, QColor& color) {
+  QFontMetrics fm(p.font());
+  QRect init_rect = fm.boundingRect(text);
+  QRect real_rect = fm.boundingRect(init_rect, 0, text);
+  real_rect.moveCenter({x, y - real_rect.height() / 2});
+
+  p.setPen(color);
+  p.drawText(real_rect.x(), real_rect.bottom(), text);
+}
+
+void OnroadHud::drawText2(QPainter &p, int x, int y, int flags, const QString &text, const QColor& color) {
+  QFontMetrics fm(p.font());
+  QRect rect = fm.boundingRect(text);
+  p.setPen(color);
+  p.drawText(QRect(x, y, rect.width(), rect.height()), flags, text);
 }
 
 // NvgWindow
@@ -408,4 +431,81 @@ void NvgWindow::showEvent(QShowEvent *event) {
 
   ui_update_params(uiState());
   prev_draw_t = millis_since_boot();
+}
+
+void OnroadHud::drawDebugText(QPainter &p) {
+  const SubMaster &sm = *(uiState()->sm);
+  QString str, temp;
+
+  int y = 80;
+  const int height = 60;
+
+  const int text_x = width()/2 + 250;
+
+  auto controls_state = sm["controlsState"].getControlsState();
+  auto car_control = sm["carControl"].getCarControl();
+  auto car_state = sm["carState"].getCarState();
+
+  float applyAccel = controls_state.getApplyAccel();
+
+  float aReqValue = controls_state.getAReqValue();
+  float aReqValueMin = controls_state.getAReqValueMin();
+  float aReqValueMax = controls_state.getAReqValueMax();
+
+//  int sccStockCamAct = (int)controls_state.getSccStockCamAct();
+//  int sccStockCamStatus = (int)controls_state.getSccStockCamStatus();
+
+  int longControlState = (int)controls_state.getLongControlState();
+  float vPid = controls_state.getVPid();
+  float upAccelCmd = controls_state.getUpAccelCmd();
+  float uiAccelCmd = controls_state.getUiAccelCmd();
+  float ufAccelCmd = controls_state.getUfAccelCmd();
+  float accel = car_control.getActuators().getAccel();
+
+  const char* long_state[] = {"off", "pid", "stopping", "starting"};
+
+  configFont(p, "Open Sans", 35, "Regular");
+  p.setPen(QColor(255, 255, 255, 200));
+  p.setRenderHint(QPainter::TextAntialiasing);
+
+  str.sprintf("State: %s\n", long_state[longControlState]);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("vPid: %.3f(%.1f)\n", vPid, vPid * 3.6f);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("P: %.3f\n", upAccelCmd);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("I: %.3f\n", uiAccelCmd);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("F: %.3f\n", ufAccelCmd);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("Accel: %.3f\n", accel);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("Apply: %.3f, Stock: %.3f\n", applyAccel, aReqValue);
+  p.drawText(text_x, y, str);
+
+  y += height;
+  str.sprintf("%.3f (%.3f/%.3f)\n", aReqValue, aReqValueMin, aReqValueMax);
+  p.drawText(text_x, y, str);
+
+  auto lead_radar = sm["radarState"].getRadarState().getLeadOne();
+  auto lead_one = sm["modelV2"].getModelV2().getLeadsV3()[0];
+
+  float radar_dist = lead_radar.getStatus() && lead_radar.getRadar() ? lead_radar.getDRel() : 0;
+  float vision_dist = lead_one.getProb() > .5 ? (lead_one.getX()[0] - 1.5) : 0;
+
+  y += height;
+  str.sprintf("Lead: %.1f/%.1f/%.1f\n", radar_dist, vision_dist, (radar_dist - vision_dist));
+  p.drawText(text_x, y, str);
 }
