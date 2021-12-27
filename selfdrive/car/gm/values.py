@@ -34,8 +34,8 @@ class CarControllerParams():
   ACCEL_SCALE = 4.0  # max(ACCEL_MAX, -ACCEL_MIN)
 
   MAX_ACC_REGEN = 1404  # ACC Regen braking is slightly less powerful than max regen paddle
-  GAS_LOOKUP_BP = [0., ACCEL_MAX]
-  GAS_LOOKUP_V = [MAX_ACC_REGEN, MAX_GAS]
+  GAS_LOOKUP_BP = [-1, 0., ACCEL_MAX]
+  GAS_LOOKUP_V = [MAX_ACC_REGEN, ZERO_GAS, MAX_GAS]
   BRAKE_LOOKUP_BP = [ACCEL_MIN, -0.1]
   BRAKE_LOOKUP_V = [MAX_BRAKE, 0]
   ACCEL_HYST_GAP = 0.02
