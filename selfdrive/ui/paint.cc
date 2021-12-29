@@ -478,33 +478,13 @@ static void ui_draw_autohold(UIState *s) {
 
 // ascc left icon bottom left 3
 static void ui_draw_ascc(UIState *s) {
-  bool acc_bool = s->scene.car_state.getAdaptiveCruise();
-  int acc = 0;
-  if (acc_bool == true) {
-    acc = 1;
-  } else {
-    acc = 0;
-  }
-
-  bool lkas_bool = s->scene.car_state.getLkasEnable();
-  int lkas = 0;
-  if (lkas_bool == true) {
-    lkas = 1;
-  } else {
-    lkas = 0;
-  }
-
-  int ascc = 0;
-  if(acc == 1 && lkas == 1) {
-    ascc = 1;
-  }else {
-    ascc = 0;
-  }
+  auto control_state = (*s->sm)["controlsState"].getControlsState();
+  int acc = control_state.getAdaptiveCruise();
 
   const int radius = 85;
   const int center_x = radius + (bdr_s*2);
   const int center_y = s->fb_h - (footer_h/2) - (radius*4) + 20;
-  ui_draw_circle_image(s, center_x, center_y, radius, "ascc", ascc);
+  ui_draw_circle_image(s, center_x, center_y, radius, "ascc", acc);
 }
 
 // lkas right icon bottom left 3 + radius
