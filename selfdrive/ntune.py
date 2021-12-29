@@ -163,6 +163,9 @@ class nTune():
   def checkValidISCC(self):
     updated = False
 
+    if self.checkValue("adaptiveCruise", 0, 1, 1):
+      updated = True
+
     # 사용 안함
     if self.checkValue("sccGasFactor", 0.5, 1.5, 1.0):
       updated = True

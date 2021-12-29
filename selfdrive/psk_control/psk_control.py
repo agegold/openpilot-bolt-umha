@@ -11,6 +11,7 @@ import logging
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
+ADAPTIVE_CRUISE = ntune_scc_get('adaptiveCruise')
 DISTANCE_GAP = ntune_scc_get('distanceGap')
 SCC_GAS_FACTOR = ntune_scc_get('sccGasFactor')
 SCC_BRAKE_FACTOR = ntune_scc_get('sccBrakeFactor')
@@ -34,7 +35,8 @@ def apply():
 
         acc = ntune_scc_get('adaptiveCruise')
 
-        message = '{\n "distanceGap": DISTANCE_GAP,' \
+        message = '{\n "adaptiveCruise": ADAPTIVE_CRUISE,' \
+                   '\n "distanceGap": DISTANCE_GAP,' \
                    '\n "sccGasFactor": SCC_GAS_FACTOR,' \
                    '\n "sccBrakeFactor": SCC_BRAKE_FACTOR,' \
                    '\n "sccCurvatureFactor": SCC_CURVATURE_FACTOR,' \
@@ -44,6 +46,7 @@ def apply():
 
         #print("message : ", message)
 
+        message = message.replace('ADAPTIVE_CRUISE', str(acc))
         message = message.replace('DISTANCE_GAP', str(DISTANCE_GAP))
         message = message.replace('SCC_GAS_FACTOR', str(ntune_scc_get('sccGasFactor')))
         message = message.replace('SCC_BRAKE_FACTOR', str(ntune_scc_get('sccBrakeFactor')))
@@ -59,6 +62,34 @@ def apply():
         return render_template('openpilot_control.html',
                                 gapParam = DISTANCE_GAP)
 
+
+def toggleAcc():
+    message = '{\n "adaptiveCruise": ADAPTIVE_CRUISE,' \
+              '\n "distanceGap": DISTANCE_GAP,' \
+              '\n "sccGasFactor": SCC_GAS_FACTOR,' \
+              '\n "sccBrakeFactor": SCC_BRAKE_FACTOR,' \
+              '\n "sccCurvatureFactor": SCC_CURVATURE_FACTOR,' \
+              '\n "longitudinalActuatorDelayLowerBound": LADLB,' \
+              '\n "longitudinalActuatorDelayUpperBound": LADUB' \
+              '\n }\n'
+
+    acc = ntune_scc_get('adaptiveCruise')
+    if acc == 0:
+        acc = 1
+    elif acc == 1:
+        acc = 0
+
+    message = message.replace('DISTANCE_GAP', str(ntune_scc_get('distanceGap')))
+    message = message.replace('ADAPTIVE_CRUISE', str(acc))
+    message = message.replace('LEAD_ACCEL_TAU', str(ntune_scc_get('leadAccelTau')))
+    message = message.replace('MIN_ACC_SPEED', str(ntune_scc_get('minAccSpeed')))
+    message = message.replace('LONG_LEAD_VISION', str(ntune_scc_get('longLeadVision')))
+    message = message.replace('SCC_CURVATURE_FACTOR', str(ntune_scc_get('sccCurvatureFactor')))
+
+    # 파일 저장
+    f = open(CONF_SCC_FILE, 'w')
+    f.write(message)
+    f.close()
 
 def main():
     app.run(host='0.0.0.0', port='7070')
