@@ -107,7 +107,7 @@ class LongControl():
                                                        v_target_future, self.v_pid, output_accel,
                                                        CS.brakePressed, CS.cruiseState.standstill, CP.minSpeedCan)
 
-    if self.long_control_state == LongCtrlState.off or not CS.adaptiveCruise or CS.gasPressed:
+    if self.long_control_state == LongCtrlState.off or not CS.adaptiveCruise or CS.gasPressed or CS.brakePressed:
       self.reset(CS.vEgo)
       output_accel = 0.
 
