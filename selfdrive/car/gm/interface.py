@@ -228,7 +228,6 @@ class CarInterface(CarInterfaceBase):
       # Added by jc01rho inspired by JangPoo
     if self.CS.main_on and self.CS.enable_lkas and not self.CS.adaptive_Cruise and ret.cruiseState.enabled and ret.gearShifter == GearShifter.drive and ret.vEgo > 2.4 and not ret.brakePressed:
       if ret.cruiseState.available and not ret.seatbeltUnlatched and not ret.espDisabled and self.flag_pcmEnable_able:
-
         if self.flag_pcmEnable_initialSet == False:
           self.initial_pcmEnable_counter = self.initial_pcmEnable_counter + 1
           if self.initial_pcmEnable_counter > 750:
