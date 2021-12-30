@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import os
 import math
+import numpy as np
 from numbers import Number
 
 from cereal import car, log
-from common.numpy_fast import clip
+from common.numpy_fast import clip, interp, mean
 from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from common.profiler import Profiler
 from common.params import Params, put_nonblocking
@@ -27,6 +28,14 @@ from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.locationd.calibrationd import Calibration
 from selfdrive.hardware import HARDWARE, TICI, EON
 from selfdrive.manager.process_config import managed_processes
+
+from selfdrive.ntune import ntune_common_get, ntune_common_enabled, ntune_scc_get
+from selfdrive.road_speed_limiter import road_speed_limiter_get_max_speed, road_speed_limiter_get_active
+from selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX, V_CRUISE_MIN, V_CRUISE_DELTA_KM, V_CRUISE_DELTA_MI
+from selfdrive.car.gm.values import SLOW_ON_CURVES, MIN_CURVE_SPEED
+
+MIN_SET_SPEED_KPH = V_CRUISE_MIN
+MAX_SET_SPEED_KPH = V_CRUISE_MAX
 
 SOFT_DISABLE_TIME = 3  # seconds
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
@@ -57,6 +66,11 @@ IGNORED_SAFETY_MODES = [SafetyModel.silent, SafetyModel.noOutput]
 
 
 class Controls:
+
+  def kph_to_clu(self, kph):
+    speed_conv_to_clu = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
+    return int(kph * CV.KPH_TO_MS * speed_conv_to_clu)
+
   def __init__(self, sm=None, pm=None, can_sock=None):
     config_realtime_process(4 if TICI else 3, Priority.CTRL_HIGH)
 
@@ -150,8 +164,34 @@ class Controls:
     self.soft_disable_timer = 0
     self.v_cruise_kph = 255
     self.v_cruise_kph_last = 0
-    self.curve_speed_ms = 255.
+    self.max_speed_clu = 0.
+    self.curve_speed_ms = 0.
     self.v_cruise_kph_limit = 0
+    self.applyMaxSpeed = 0
+    self.roadLimitSpeedActive = 0
+    self.roadLimitSpeed = 0
+    self.roadLimitSpeedLeftDist = 0
+
+    self.brake_set_speed_clu = self.kph_to_clu(10)  # 브레이크 최저속도 20km
+    self.min_set_speed_clu = self.kph_to_clu(MIN_SET_SPEED_KPH)
+    self.max_set_speed_clu = self.kph_to_clu(MAX_SET_SPEED_KPH)
+
+    # 앞차 거리 (PSK) 2021.10.15
+    # 레이더 비전 상태를 저장한다.
+    self.limited_lead = False
+
+    self.speed_conv_to_ms = CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS
+    self.speed_conv_to_clu = CV.MS_TO_KPH if self.is_metric else CV.MS_TO_MPH
+
+    self.slowing_down = False
+    self.slowing_down_alert = False
+    self.slowing_down_sound_alert = False
+    self.active_cam = False
+
+    # scc smoother
+    self.is_cruise_enabled = False
+    self.applyMaxSpeed = 0
+
     self.mismatch_counter = 0
     self.cruise_mismatch_counter = 0
     self.can_error_counter = 0
@@ -189,6 +229,143 @@ class Controls:
     # controlsd is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
+
+  def reset(self):
+      self.max_speed_clu = 0.
+      self.curve_speed_ms = 0.
+      self.slowing_down = False
+      self.slowing_down_alert = False
+      self.slowing_down_sound_alert = False
+
+  def get_lead(self, sm):
+      radar = sm['radarState']
+      if radar.leadOne.status:
+        return radar.leadOne
+      return None
+
+  def get_long_lead_safe_speed(self, vEgo, sm, CS):
+      if CS.adaptiveCruise:
+        lead = self.get_lead(sm)
+        if lead is not None:
+          # d : 비전 레이더 거리
+          d = lead.dRel - 5.
+          # vRel : Real Speed (- 값이면 내차 속도가 더 빠름)
+          # lead의 vrel(상대속도)에 곱해지는 상수라 커지면 더 멀리서 줄이기 시작합니다
+          # longLeadVision : 비전이 인식한 지정된 거리부터 속도를 줄인다.
+          if 0. < d < -lead.vRel * (9. + 3.) * 2. and lead.vRel < -1.:
+            t = d / lead.vRel
+            accel = -(lead.vRel / t) * self.speed_conv_to_clu
+            # 속도를 증가하는 속도를 Delay 한다. -> 속도를 더 지속적으로 낮춘다.
+            accel *= 0.001
+
+            if accel < 0.:
+              # target_speed = vEgo + accel  # accel 값은 1키로씩 상승한다.
+              # min_set_speed_clu = 5km
+              target_speed = vEgo + accel  # accel 값은 1키로씩 감소한다. (60,59,58,57)
+              target_speed = max(target_speed, self.min_set_speed_clu)
+              return target_speed
+
+      return 0
+
+  def cal_curve_speed(self, sm, v_ego, frame):
+
+      if frame % 20 == 0:
+         md = sm['modelV2']
+         if len(md.position.x) == TRAJECTORY_SIZE and len(md.position.y) == TRAJECTORY_SIZE:
+            x = md.position.x
+            y = md.position.y
+            dy = np.gradient(y, x)
+            d2y = np.gradient(dy, x)
+            curv = d2y / (1 + dy ** 2) ** 1.5
+
+            start = int(interp(v_ego, [10., 27.], [10, TRAJECTORY_SIZE - 10]))
+            curv = curv[start:min(start + 10, TRAJECTORY_SIZE)]
+            a_y_max = 2.975 - v_ego * 0.0375  # ~1.85 @ 75mph, ~2.6 @ 25mph
+            v_curvature = np.sqrt(a_y_max / np.clip(np.abs(curv), 1e-4, None))
+            model_speed = np.mean(v_curvature) * 0.85 * ntune_scc_get("sccCurvatureFactor")   #  MIN : 0.5, MAX : 1.5, DEFAULT : 0.98
+
+            if model_speed < v_ego:
+              self.curve_speed_ms = float(max(model_speed, MIN_CURVE_SPEED))
+            else:
+              self.curve_speed_ms = 255.
+
+            if np.isnan(self.curve_speed_ms):
+              self.curve_speed_ms = 255.
+         else:
+           self.curve_speed_ms = 255.
+
+
+  # [크루즈 MAX 속도 설정] #
+  def cal_max_speed(self, frame: int, vEgo, sm, CS):
+
+      apply_limit_speed, road_limit_speed, left_dist, first_started, max_speed_log = \
+          road_speed_limiter_get_max_speed(vEgo, self.is_metric)
+
+      # print("apply_limit_speed : ", apply_limit_speed)
+      # print("road_limit_speed : ", road_limit_speed)
+      # print("left_dist : ", left_dist)
+      # print("first_started : ", first_started)
+      # print("max_speed_log : ", max_speed_log)
+
+      # self, sm, v_ego, frame
+      self.cal_curve_speed(sm, vEgo, frame)
+
+      if SLOW_ON_CURVES and self.curve_speed_ms >= MIN_CURVE_SPEED:
+          max_speed_clu = min(self.v_cruise_kph * CV.KPH_TO_MS, self.curve_speed_ms) * self.speed_conv_to_clu
+      else:
+          max_speed_clu = self.kph_to_clu(self.v_cruise_kph)
+
+      max_speed_log = ""
+
+      if apply_limit_speed >= self.kph_to_clu(30):
+
+        # 크루즈 초기 설정 속도 (PSK)
+        # controls.v_cruise_kph : 크루즈 설정 속도
+        if first_started:
+          self.max_speed_clu = self.v_cruise_kph
+
+        max_speed_clu = min(max_speed_clu, apply_limit_speed)
+
+        if self.v_cruise_kph > apply_limit_speed:
+
+          if not self.slowing_down_alert and not self.slowing_down:
+            self.slowing_down_sound_alert = True
+            self.slowing_down = True
+
+          self.slowing_down_alert = True
+
+        else:
+          self.slowing_down_alert = False
+
+      else:
+        self.slowing_down_alert = False
+        self.slowing_down = False
+
+      # 안전거리 활성화
+      #lead_speed = self.get_long_lead_safe_speed(vEgo, sm, CS)
+      #if lead_speed >= self.min_set_speed_clu:
+        #  if lead_speed < max_speed_clu:
+        #  max_speed_clu = min(max_speed_clu, lead_speed)
+        #  if not self.limited_lead:
+        #    self.max_speed_clu = vEgo + 3.
+      #    self.limited_lead = True
+      #else:
+      #  self.limited_lead = False
+
+      self.update_max_speed(int(max_speed_clu + 0.5), CS)
+      # print("update_max_speed() value : ", self.max_speed_clu)
+
+      return road_limit_speed, left_dist, max_speed_log
+
+
+  def update_max_speed(self, max_speed, CS):
+    if not CS.adaptiveCruise or self.max_speed_clu <= 0:
+      self.max_speed_clu = max_speed
+    else:
+      kp = 0.01
+      error = max_speed - self.max_speed_clu
+      self.max_speed_clu = self.max_speed_clu + error * kp
+
 
   def update_events(self, CS):
     """Compute carEvents from carState"""
@@ -316,6 +493,13 @@ class Controls:
     if planner_fcw or model_fcw:
       self.events.add(EventName.fcw)
 
+    # NDA Neokii Add.. (PSK)
+    if self.slowing_down_sound_alert:
+      self.slowing_down_sound_alert = False
+      self.events.add(EventName.slowingDownSpeedSound)
+    elif self.slowing_down_alert:
+      self.events.add(EventName.slowingDownSpeed)
+
     if TICI:
       logs = messaging.drain_sock(self.log_sock, wait_for_one=False)
       messages = []
@@ -355,11 +539,13 @@ class Controls:
         self.events.add(EventName.processNotRunning)
 
     # Only allow engagement with brake pressed when stopped behind another stopped car
+    # 정차한 다른 차 뒤에 정차할 때만 브레이크를 밟은 상태로 맞물릴 수 있습니다.
     speeds = self.sm['longitudinalPlan'].speeds
     if len(speeds) > 1:
       v_future = speeds[-1]
     else:
       v_future = 100.0
+    # [MAD MODE]
     #if CS.brakePressed and v_future >= STARTING_TARGET_SPEED \
       #and self.CP.openpilotLongitudinalControl and CS.vEgo < 0.3:
       #self.events.add(EventName.noTarget)
@@ -515,7 +701,13 @@ class Controls:
     # Update VehicleModel
     params = self.sm['liveParameters']
     x = max(params.stiffnessFactor, 0.1)
-    sr = max(params.steerRatio, 0.1)
+    #sr = max(params.steerRatio, 0.1)
+
+    if ntune_common_enabled('useLiveSteerRatio'):
+      sr = max(params.steerRatio, 0.1)
+    else:
+      sr = max(ntune_common_get('steerRatio'), 0.1)
+
     self.VM.update_params(x, sr)
 
     lat_plan = self.sm['lateralPlan']
@@ -629,7 +821,7 @@ class Controls:
 
     recent_blinker = (self.sm.frame - self.last_blinker_frame) * DT_CTRL < 5.0  # 5s blinker cooldown
     ldw_allowed = self.is_ldw_enabled and CS.vEgo > LDW_MIN_SPEED and not recent_blinker \
-                    and not self.active and self.sm['liveCalibration'].calStatus == Calibration.CALIBRATED
+                      and not self.active and self.sm['liveCalibration'].calStatus == Calibration.CALIBRATED
 
     meta = self.sm['modelV2'].meta
     if len(meta.desirePrediction) and ldw_allowed:
@@ -637,8 +829,9 @@ class Controls:
       left_lane_visible = self.sm['lateralPlan'].lProb > 0.5
       l_lane_change_prob = meta.desirePrediction[Desire.laneChangeLeft - 1]
       r_lane_change_prob = meta.desirePrediction[Desire.laneChangeRight - 1]
-      l_lane_close = left_lane_visible and (self.sm['modelV2'].laneLines[1].y[0] > -(1.08 + CAMERA_OFFSET))
-      r_lane_close = right_lane_visible and (self.sm['modelV2'].laneLines[2].y[0] < (1.08 - CAMERA_OFFSET))
+      cameraOffset = ntune_common_get("cameraOffset")
+      l_lane_close = left_lane_visible and (self.sm['modelV2'].laneLines[1].y[0] > -(1.08 + cameraOffset))
+      r_lane_close = right_lane_visible and (self.sm['modelV2'].laneLines[2].y[0] < (1.08 - cameraOffset))
 
       CC.hudControl.leftLaneDepart = bool(l_lane_change_prob > LANE_DEPARTURE_THRESHOLD and l_lane_close)
       CC.hudControl.rightLaneDepart = bool(r_lane_change_prob > LANE_DEPARTURE_THRESHOLD and r_lane_close)
@@ -647,7 +840,7 @@ class Controls:
       self.events.add(EventName.ldw)
 
     clear_event = ET.WARNING if ET.WARNING not in self.current_alert_types else None
-    alerts = self.events.create_alerts(self.current_alert_types, [self.CP, self.sm, self.is_metric, self.soft_disable_timer])
+    alerts = self.events.create_alerts(self.current_alert_types, [self.CP, self.sm, self.is_metric])
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event)
     CC.hudControl.visualAlert = self.AM.visual_alert
@@ -658,12 +851,15 @@ class Controls:
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
     force_decel = (self.sm['driverMonitoringState'].awarenessStatus < 0.) or \
-                  (self.state == State.softDisabling)
+                   (self.state == State.softDisabling)
 
     # Curvature & Steering angle
     params = self.sm['liveParameters']
     steer_angle_without_offset = math.radians(CS.steeringAngleDeg - params.angleOffsetAverageDeg)
     curvature = -self.VM.calc_curvature(steer_angle_without_offset, CS.vEgo)
+
+    # NDA Add.. (PSK)
+    road_limit_speed, left_dist, max_speed_log = self.cal_max_speed(self.sm.frame, CS.vEgo, self.sm, CS)
 
     # controlsState
     dat = messaging.new_message('controlsState')
@@ -686,14 +882,44 @@ class Controls:
     controlsState.engageable = not self.events.any(ET.NO_ENTRY)
     controlsState.longControlState = self.LoC.long_control_state
     controlsState.vPid = float(self.LoC.v_pid)
-    controlsState.vCruise = float(self.v_cruise_kph)
+
+    # Cruise SET
+    # kph [applyMaxSpeed, cruiseMaxSpeed]
+    controlsState.applyMaxSpeed = float(
+      clip(self.v_cruise_kph, MIN_SET_SPEED_KPH, self.max_speed_clu * self.speed_conv_to_ms * CV.MS_TO_KPH))
+    controlsState.cruiseMaxSpeed = self.v_cruise_kph
+
+    if controlsState.applyMaxSpeed == controlsState.cruiseMaxSpeed:
+      controlsState.vCruise = float(controlsState.cruiseMaxSpeed)
+    elif controlsState.applyMaxSpeed < controlsState.cruiseMaxSpeed:
+      controlsState.vCruise = float(controlsState.applyMaxSpeed)
+
     controlsState.upAccelCmd = float(self.LoC.pid.p)
     controlsState.uiAccelCmd = float(self.LoC.pid.i)
     controlsState.ufAccelCmd = float(self.LoC.pid.f)
     controlsState.cumLagMs = -self.rk.remaining * 1000.
     controlsState.startMonoTime = int(start_time * 1e9)
-    controlsState.forceDecel = bool(force_decel)
+    #controlsState.forceDecel = bool(force_decel)
     controlsState.canErrorCounter = self.can_error_counter
+
+    # NDA
+    controlsState.roadLimitSpeedActive = road_speed_limiter_get_active()
+    controlsState.roadLimitSpeed = road_limit_speed
+    controlsState.roadLimitSpeedLeftDist = left_dist
+
+    # STEER
+    controlsState.angleSteers = steer_angle_without_offset * CV.RAD_TO_DEG
+    controlsState.steerRatio = self.VM.sR
+    controlsState.steerRateCost = ntune_common_get('steerRateCost')
+    controlsState.steerActuatorDelay = ntune_common_get('steerActuatorDelay')
+
+    # SCC
+    controlsState.distanceGap = ntune_scc_get('distanceGap')
+    controlsState.sccGasFactor = ntune_scc_get('sccGasFactor')
+    controlsState.sccBrakeFactor = ntune_scc_get('sccBrakeFactor')
+    controlsState.sccCurvatureFactor = ntune_scc_get('sccCurvatureFactor')
+    controlsState.longitudinalActuatorDelayLowerBound = ntune_scc_get('longitudinalActuatorDelayLowerBound')
+    controlsState.longitudinalActuatorDelayUpperBound = ntune_scc_get('longitudinalActuatorDelayUpperBound')
 
     if self.joystick_mode:
       controlsState.lateralControlState.debugState = lac_log
@@ -736,6 +962,7 @@ class Controls:
 
     # copy CarControl to pass to CarInterface on the next iteration
     self.CC = CC
+
 
   def step(self):
     start_time = sec_since_boot()
