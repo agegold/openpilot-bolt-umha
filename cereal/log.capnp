@@ -559,6 +559,35 @@ struct ControlsState @0x97ff69c53601abf1 {
   curvature @37 :Float32;  # path curvature from vehicle model
   forceDecel @51 :Bool;
 
+  # Neokii NDA ADD (PSK)
+  applyMaxSpeed @60 :Float32;
+  cruiseMaxSpeed @61 :Float32;
+  roadLimitSpeedActive @62 :Int32;
+  roadLimitSpeed @63 :UInt32;
+  roadLimitSpeedLeftDist @64 :UInt32;
+
+  # Neokii ,,,,,
+  angleSteers @65 :Float32;
+  applyAccel @66 :Float32;
+  aReqValue @67 :Float32;
+  aReqValueMin @68 :Float32;
+  aReqValueMax @69 :Float32;
+
+  steerRatio @70 :Float32;
+  steerRateCost @71 :Float32;
+  steerActuatorDelay @72 :Float32;
+  sccGasFactor @73 :Float32;
+  sccBrakeFactor @74 :Float32;
+  sccCurvatureFactor @75 :Float32;
+  longitudinalActuatorDelayLowerBound @76 :Float32;
+  longitudinalActuatorDelayUpperBound @77 :Float32;
+
+  # add ...
+  lateralControlSelect  @78 :UInt8;
+  distanceGap @79 :Int16;
+  adaptiveCruise @80 :Int16;
+
+
   # UI alerts
   alertText1 @24 :Text;
   alertText2 @25 :Text;
@@ -1392,6 +1421,19 @@ struct UploaderState {
   lastFilename @6 :Text;
 }
 
+# Neokii
+struct RoadLimitSpeed {
+    active @0 :UInt16;
+    roadLimitSpeed @1 :UInt16;
+    isHighway @2 :Bool;
+    camType @3 :UInt16;
+    camLimitSpeedLeftDist @4 :UInt16;
+    camLimitSpeed @5 :UInt16;
+    sectionLimitSpeed @6 :UInt16;
+    sectionLeftDist @7 :UInt16;
+    camSpeedFactor @8 :Float32;
+}
+
 struct NavInstruction {
   maneuverPrimaryText @0 :Text;
   maneuverSecondaryText @1 :Text;
@@ -1486,6 +1528,9 @@ struct Event {
     clocks @35 :Clocks;
     deviceState @6 :DeviceState;
     logMessage @18 :Text;
+
+    # neokii
+    roadLimitSpeed @85 :RoadLimitSpeed;
 
     # navigation
     navInstruction @82 :NavInstruction;
