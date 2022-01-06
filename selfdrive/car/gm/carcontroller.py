@@ -45,6 +45,9 @@ class CarController():
     self.packer_pt = CANPacker(DBC[CP.carFingerprint]['pt'])
     #self.packer_obj = CANPacker(DBC[CP.carFingerprint]['radar'])
     #self.packer_ch = CANPacker(DBC[CP.carFingerprint]['chassis'])
+    
+    self.apply_gas = 0
+    self.apply_brake = 0
 
   def update(self, enabled, CS, frame, actuators,
              hud_v_cruise, hud_show_lanes, hud_show_car, hud_alert):
@@ -86,18 +89,35 @@ class CarController():
     if not enabled or not CS.adaptive_Cruise or not CS.CP.enableGasInterceptor:
       comma_pedal = 0
     elif CS.adaptive_Cruise:
-      min_pedal_speed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-      pedal_accel = actuators.accel * 0.45
-      comma_pedal = clip(pedal_accel, min_pedal_speed, 1.)
-      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
+      self.apply_gas = int(round(interp(actuators.accel, P.GAS_LOOKUP_BP, P.GAS_LOOKUP_V)))
+      self.apply_brake = int(round(interp(actuators.accel, P.BRAKE_LOOKUP_BP, P.BRAKE_LOOKUP_V)))
+        
+      at_full_stop = enabled and CS.out.standstill
+      near_stop = enabled and (CS.out.vEgo < P.NEAR_STOP_BRAKE_PHASE)
+        
+      can_sends.append(gmcan.create_friction_brake_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_brake, idx, near_stop, at_full_stop))
+    
+      if CS.CP.enableGasInterceptor:
+        pedal_gas = clip(actuators.accel, 0., 1.) # TODO: major tuning
+        can_sends.append(reate_gas_command(self.packer_pt, pedal_gas, idx))
+      else:
+        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, enabled, at_full_stop))
+      
+    
+    
+    ##################################################################################################################
+#      min_pedal_speed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
+#      pedal_accel = actuators.accel * 0.45
+#      comma_pedal = clip(pedal_accel, min_pedal_speed, 1.)
+#      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
      
-      if actuators.accel < 0.1:
-        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
+#      if actuators.accel < 0.1:
+#        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
 
-    if (frame % 4) == 0:
-      idx = (frame // 4) % 4
+#    if (frame % 4) == 0:
+#      idx = (frame // 4) % 4
 
-      can_sends.append(create_gas_command(self.packer_pt, comma_pedal, idx))
+#      can_sends.append(create_gas_command(self.packer_pt, comma_pedal, idx))
     
     # Send dashboard UI commands (ACC status), 25hz
     #if (frame % 4) == 0:
