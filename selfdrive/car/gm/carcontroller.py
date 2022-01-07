@@ -22,15 +22,6 @@ def accel_hysteresis(accel, accel_steady):
 
     return accel, accel_steady
 
-#def compute_gas_brake(accel, speed):
-#  creep_brake = 0.0
-#  creep_speed = 2.3
-#  creep_brake_value = 0.15
-#  if speed < creep_speed:
-#    creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
-#  gb = float(accel) / 6 - creep_brake
-#  return clip(gb, 0.0, 1.0), clip(-gb, 0.0, 1.0)
-
 class CarController():
   def __init__(self, dbc_name, CP, VM):
     self.start_time = 0.
@@ -46,21 +37,11 @@ class CarController():
     #self.packer_obj = CANPacker(DBC[CP.carFingerprint]['radar'])
     #self.packer_ch = CANPacker(DBC[CP.carFingerprint]['chassis'])
     
-    self.apply_gas = 0
-    self.apply_brake = 0
-
   def update(self, enabled, CS, frame, actuators,
              hud_v_cruise, hud_show_lanes, hud_show_car, hud_alert):
 
     P = self.params
     
-#    if enabled:
-#      accel = actuators.accel
-#      gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo)
-#    else:
-#      accel = 0.0
-#      gas, brake = 0.0, 0.0
-
     # Send CAN commands.
     can_sends = []
 
@@ -86,33 +67,18 @@ class CarController():
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, lkas_enabled))
 
     # Pedal/Regen
+    comma_pedal =0  #for supress linter error.
+    
     if not enabled or not CS.adaptive_Cruise or not CS.CP.enableGasInterceptor:
       comma_pedal = 0
     elif CS.adaptive_Cruise:
-#      self.apply_gas = int(round(interp(actuators.accel, P.GAS_LOOKUP_BP, P.GAS_LOOKUP_V)))
-#      self.apply_brake = int(round(interp(actuators.accel, P.BRAKE_LOOKUP_BP, P.BRAKE_LOOKUP_V)))
-        
-#      at_full_stop = enabled and CS.out.standstill
-#      near_stop = enabled and (CS.out.vEgo < P.NEAR_STOP_BRAKE_PHASE)
-        
-#      can_sends.append(gmcan.create_friction_brake_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_brake, idx, near_stop, at_full_stop))
-    
-#      if CS.CP.enableGasInterceptor:
-#        pedal_gas = clip(actuators.accel, 0., 1.) # TODO: major tuning
-#        can_sends.append(reate_gas_command(self.packer_pt, pedal_gas, idx))
-#      else:
-#        can_sends.append(gmcan.create_gas_regen_command(self.packer_pt, CanBus.POWERTRAIN, self.apply_gas, idx, enabled, at_full_stop))
-      
-    
-    
-    ##################################################################################################################
       min_pedal_speed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-      pedal_accel = actuators.accel * 0.45
-      regen = -0.875 * actuators.accel
-        
+      pedal_accel = actuators.accel * 0.5
       comma_pedal = clip(pedal_accel, min_pedal_speed, 1.)    
       comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
         
+      regen = -0.875 * actuators.accel
+             
       final_pedal = clip(comma_pedal - regen, 0., 1.)      
     
       if regen > 0.1:
@@ -121,7 +87,7 @@ class CarController():
     if (frame % 4) == 0:
       idx = (frame // 4) % 4
 
-      can_sends.append(create_gas_command(self.packer_pt, comma_pedal, idx))
+      can_sends.append(create_gas_command(self.packer_pt, final_pedal, idx))
     
     # Send dashboard UI commands (ACC status), 25hz
     #if (frame % 4) == 0:
