@@ -77,17 +77,13 @@ class CarController():
       comma_pedal = clip(pedal_accel, min_pedal_speed, 1.)    
       comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
         
-      regen = -0.875 * actuators.accel
-             
-      final_pedal = clip(comma_pedal - regen, 0., 1.)      
-    
-      if regen > 0.1:
+      if actuators.accel < 0.1:
         can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
 
     if (frame % 4) == 0:
       idx = (frame // 4) % 4
 
-      can_sends.append(create_gas_command(self.packer_pt, final_pedal, idx))
+      can_sends.append(create_gas_command(self.packer_pt, comma_pedal, idx))
     
     # Send dashboard UI commands (ACC status), 25hz
     #if (frame % 4) == 0:
