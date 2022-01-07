@@ -105,9 +105,9 @@ class LongControl():
       self.reset(CS.vEgo)
       output_accel = 0.
 
-#    elif CS.regenPressed:
-#      self.reset(CS.vEgo)
-#      output_accel = REGEN_THRESHOLD
+    elif CS.regenPressed:
+      self.reset(CS.vEgo)
+      output_accel = REGEN_THRESHOLD
 
 #    elif CS.gasPressed:
 #      self.reset(CS.vEgo)
