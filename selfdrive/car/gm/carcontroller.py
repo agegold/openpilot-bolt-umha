@@ -22,15 +22,6 @@ def accel_hysteresis(accel, accel_steady):
 
     return accel, accel_steady
 
-#def compute_gas_brake(accel, speed):
-#  creep_brake = 0.0
-#  creep_speed = 2.3
-#  creep_brake_value = 0.15
-#  if speed < creep_speed:
-#    creep_brake = (creep_speed - speed) / creep_speed * creep_brake_value
-#  gb = float(accel) / 6 - creep_brake
-#  return clip(gb, 0.0, 1.0), clip(-gb, 0.0, 1.0)
-
 class CarController():
   def __init__(self, dbc_name, CP, VM):
     self.start_time = 0.
@@ -50,13 +41,6 @@ class CarController():
              hud_v_cruise, hud_show_lanes, hud_show_car, hud_alert):
 
     P = self.params
-    
-#    if enabled:
-#      accel = actuators.accel
-#      gas, brake = compute_gas_brake(actuators.accel, CS.out.vEgo)
-#    else:
-#      accel = 0.0
-#      gas, brake = 0.0, 0.0
 
     # Send CAN commands.
     can_sends = []
