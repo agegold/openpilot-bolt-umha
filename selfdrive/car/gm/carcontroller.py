@@ -83,9 +83,9 @@ class CarController():
 #      comma_pedal = clip(gas_mult * (gas - brake), 0., 1.)
     
       minimumPedalOutputBySpeed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-      pedal_accel = actuators.accel * 0.475
+      pedal_accel = actuators.accel * 0.45
       comma_pedal = clip(pedal_accel, minimumPedalOutputBySpeed, 1.)
-      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
+#      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
             
 #      if actuators.accel < 0.1:
 #        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
