@@ -83,7 +83,7 @@ class CarController():
 #      comma_pedal = clip(gas_mult * (gas - brake), 0., 1.)
     
       minimumPedalOutputBySpeed = interp(CS.out.vEgo, VEL, MIN_PEDAL)
-      pedal_accel = actuators.accel * 0.45
+      pedal_accel = actuators.accel * 0.43
       comma_pedal = clip(pedal_accel, minimumPedalOutputBySpeed, 1.)
 #      comma_pedal, self.accel_steady = accel_hysteresis(comma_pedal, self.accel_steady)
             
