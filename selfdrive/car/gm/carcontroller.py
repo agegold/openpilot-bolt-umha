@@ -92,7 +92,7 @@ class CarController():
 #        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
 
     if (frame % 4) == 0:
-      idx = (frame // 2) % 4
+      idx = (frame // 4) % 4
       can_sends.append(create_gas_interceptor_command(self.packer_pt, final_pedal, idx))
       
     # Send dashboard UI commands (ACC status), 25hz
